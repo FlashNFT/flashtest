@@ -1,7 +1,9 @@
 --[[
-    Script de Controle de Velocidade (v5 - Correção de Sintaxe e Diagnóstico)
-    - Corrigido erro de digitação ('UDIm2' -> 'UDim2') que impedia o script de rodar.
-    - Adicionados prints de diagnóstico para o console (aperte F9 no jogo para ver).
+    Script de Controle de Velocidade (v6 - Otimizado)
+    - Corrigido erro de digitação ('UDIm2' -> 'UDim2').
+    - Adicionados prints de diagnóstico.
+    - Otimizada a lógica para desativar o WalkSpeed do Humanoide ao usar a força física,
+      evitando conflitos de movimento.
 ]]
 
 --================================================================================--
@@ -13,6 +15,8 @@ local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
 
 --================================================================================--
 --[ INTERFACE GRÁFICA (GUI) ]
@@ -41,7 +45,7 @@ TitleLabel.Size = UDim2.new(1, 0, 0, 20)
 TitleLabel.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
 TitleLabel.TextColor3 = Color3.new(1, 1, 1)
 TitleLabel.Text = "Controle de Velocidade"
-TitleLabel.Font = "SourceSansBold"
+TitleLabel.Font = Enum.Font.SourceSansBold
 TitleLabel.TextSize = 14
 TitleLabel.Parent = MainFrame
 
@@ -52,7 +56,7 @@ SpeedValueLabel.Position = UDim2.new(1, -55, 0, 0)
 SpeedValueLabel.BackgroundColor3 = Color3.fromRGB(51, 51, 51)
 SpeedValueLabel.TextColor3 = Color3.new(1, 1, 0)
 SpeedValueLabel.Text = "16x"
-SpeedValueLabel.Font = "SourceSansBold"
+SpeedValueLabel.Font = Enum.Font.SourceSansBold
 SpeedValueLabel.Parent = TitleLabel
 
 local SliderTrack = Instance.new("Frame")
@@ -72,12 +76,11 @@ SliderHandle.Parent = SliderTrack
 local ResetSpeedButton = Instance.new("TextButton")
 ResetSpeedButton.Name = "ResetSpeedButton"
 ResetSpeedButton.Size = UDim2.new(0, 180, 0, 25)
--- AQUI ESTAVA O ERRO -> 'UDIm2'. AGORA CORRIGIDO PARA 'UDim2'.
 ResetSpeedButton.Position = UDim2.new(0, 10, 0, 60)
 ResetSpeedButton.BackgroundColor3 = Color3.new(0.8, 0.5, 0.2)
 ResetSpeedButton.TextColor3 = Color3.new(1, 1, 1)
 ResetSpeedButton.Text = "Resetar Velocidade"
-ResetSpeedButton.Font = "SourceSansBold"
+ResetSpeedButton.Font = Enum.Font.SourceSansBold
 ResetSpeedButton.Parent = MainFrame
 
 print("GUI criada com sucesso.")
@@ -89,81 +92,80 @@ print("GUI criada com sucesso.")
 local MIN_SPEED = 16
 local MAX_SPEED = 500
 
-local originalSpeed = 16
-local currentSpeed = 16
+local originalSpeed = humanoid.WalkSpeed
+local currentSpeed = originalSpeed
 local draggingSlider = false
 local speedEnabled = false
 
 local physicsAttachment = nil
 local linearVelocity = nil
 
-local function setupPhysics(character)
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+local function setupPhysics(char)
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     print("Configurando física para o personagem...")
     
-    if linearVelocity then linearVelocity:Destroy() end
+    local rootPart = char.HumanoidRootPart
+    
     if physicsAttachment then physicsAttachment:Destroy() end
 
-    local rootPart = character.HumanoidRootPart
-    
     physicsAttachment = Instance.new("Attachment", rootPart)
     linearVelocity = Instance.new("LinearVelocity", physicsAttachment)
     
     linearVelocity.Attachment0 = physicsAttachment
     linearVelocity.MaxForce = math.huge
-    linearVelocity.RelativeTo = "World"
+    linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
     linearVelocity.VectorVelocity = Vector3.new(0, 0, 0)
     linearVelocity.Enabled = false
     print("Física configurada.")
 end
 
 local function onHeartbeat()
-    if not speedEnabled or not localPlayer.Character or not linearVelocity then return end
-    
-    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not humanoid or humanoid:GetState() == Enum.HumanoidStateType.Dead then
-        linearVelocity.VectorVelocity = Vector3.new(0,0,0) -- Para a força se o jogador morrer
-        return
-    end
+    if not speedEnabled or not humanoid or humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
     
     local moveDirection = humanoid.MoveDirection
-    local targetVelocity = Vector3.new(moveDirection.X * currentSpeed, 0, moveDirection.Z * currentSpeed)
+    -- A força é aplicada apenas na direção do movimento, ignorando o eixo Y
+    local targetVelocity = Vector3.new(moveDirection.X, 0, moveDirection.Z).Unit * currentSpeed
     linearVelocity.VectorVelocity = targetVelocity
 end
 
+local function enableSpeedSystem()
+    if not speedEnabled then
+        humanoid.WalkSpeed = 0 -- Impede o movimento padrão
+        if linearVelocity then linearVelocity.Enabled = true end
+        speedEnabled = true
+        print("Sistema de velocidade ATIVADO.")
+    end
+end
+
 local function updateSpeedFromSlider()
-    local handlePos = SliderHandle.Position.X.Offset
     local trackWidth = SliderTrack.AbsoluteSize.X
     local handleWidth = SliderHandle.AbsoluteSize.X
     if trackWidth <= handleWidth then return end
     
+    local handlePos = SliderHandle.Position.X.Offset
     local percentage = handlePos / (trackWidth - handleWidth)
+    
     currentSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * percentage
     SpeedValueLabel.Text = string.format("%.0fx", currentSpeed)
     
-    if not speedEnabled then
-        speedEnabled = true
-        if linearVelocity then linearVelocity.Enabled = true end
-        print("Força de velocidade ATIVADA.")
-    end
+    enableSpeedSystem()
 end
 
 ResetSpeedButton.MouseButton1Click:Connect(function()
     speedEnabled = false
     if linearVelocity then linearVelocity.Enabled = false end
     
-    if localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
-        localPlayer.Character.Humanoid.WalkSpeed = originalSpeed
-    end
+    humanoid.WalkSpeed = originalSpeed
     
     currentSpeed = originalSpeed
     SpeedValueLabel.Text = string.format("%.0fx", originalSpeed)
+    
     local percentage = math.max(0, (originalSpeed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED))
     local trackWidth = SliderTrack.AbsoluteSize.X
     local handleWidth = SliderHandle.AbsoluteSize.X
     local newX = percentage * (trackWidth - handleWidth)
     SliderHandle.Position = UDim2.new(0, newX, 0, -5)
-    print("Força de velocidade DESATIVADA. Velocidade resetada.")
+    print("Sistema de velocidade DESATIVADO. Velocidade resetada.")
 end)
 
 SliderHandle.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSlider = true end end)
@@ -183,17 +185,22 @@ end)
 --================================================================================--
 --[ INICIALIZAÇÃO ]
 --================================================================================--
-local function initialize()
-    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
-    setupPhysics(character)
-    local humanoid = character:WaitForChild("Humanoid")
+local function onCharacterAdded(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
     originalSpeed = humanoid.WalkSpeed
     currentSpeed = originalSpeed
-    SpeedValueLabel.Text = string.format("%.0fx", originalSpeed)
+    setupPhysics(char)
+    
+    -- Se o sistema de velocidade estava ativo, reativa no novo personagem
+    if speedEnabled then
+        enableSpeedSystem()
+    end
 end
 
-localPlayer.CharacterAdded:Connect(setupPhysics)
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
 
-initialize()
+-- Configuração inicial
+onCharacterAdded(character)
 RunService.Heartbeat:Connect(onHeartbeat)
 print("Script de Velocidade (Método de Força Física) carregado e pronto.")
